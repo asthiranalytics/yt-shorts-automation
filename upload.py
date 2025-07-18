@@ -1,19 +1,29 @@
 import os
+import json
 import pickle
-import google.auth
+from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.http import MediaFileUpload
 
 def upload_to_youtube(file_path, title):
     scopes = ["https://www.googleapis.com/auth/youtube.upload"]
-    flow = InstalledAppFlow.from_client_secrets_file("client_secret.json", scopes)
-    credentials = flow.run_local_server()
-    
-    with open("token.pkl", "wb") as f:
-        pickle.dump(credentials, f)
 
+    # Load client secret from environment variable
+    client_secret_str = os.environ["CLIENT_SECRET_JSON"]
+    client_config = json.loads(client_secret_str)
+
+    # Setup OAuth flow from loaded config
+    flow = Flow.from_client_config(client_config, scopes=scopes, redirect_uri='http://localhost:8080/')
+    credentials = flow.run_local_server(port=8080)
+
+    # Save the credentials for future use
+    with open("token.pkl", "wb") as token_file:
+        pickle.dump(credentials, token_file)
+
+    # Build YouTube API client
     youtube = build("youtube", "v3", credentials=credentials)
 
+    # Prepare the request body
     request_body = {
         "snippet": {
             "title": title[:100],
@@ -27,6 +37,7 @@ def upload_to_youtube(file_path, title):
         }
     }
 
+    # Upload the video
     media_file = MediaFileUpload(file_path)
     response = youtube.videos().insert(
         part="snippet,status",
@@ -34,4 +45,4 @@ def upload_to_youtube(file_path, title):
         media_body=media_file
     ).execute()
 
-    print("Upload successful:", response["id"])
+    print("✅ Upload successful:", response["id"])
