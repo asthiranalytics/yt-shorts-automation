@@ -1,29 +1,41 @@
 import os
 import json
 import pickle
-from google_auth_oauthlib.flow import Flow
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 def upload_to_youtube(file_path, title):
     scopes = ["https://www.googleapis.com/auth/youtube.upload"]
 
-    # Load client secret from environment variable
+    # Load CLIENT_SECRET_JSON from environment
     client_secret_str = os.environ["CLIENT_SECRET_JSON"]
-    client_config = json.loads(client_secret_str)
+    client_secret = json.loads(client_secret_str)
 
-    # Setup OAuth flow from loaded config
-    flow = Flow.from_client_config(client_config, scopes=scopes, redirect_uri='http://localhost:8080/')
-    credentials = flow.run_local_server(port=8080)
+    credentials = None
 
-    # Save the credentials for future use
-    with open("token.pkl", "wb") as token_file:
-        pickle.dump(credentials, token_file)
+    # Step 1: Try loading token from file
+    if os.path.exists("token.pkl"):
+        with open("token.pkl", "rb") as f:
+            credentials = pickle.load(f)
 
-    # Build YouTube API client
+    # Step 2: Refresh token if expired
+    if credentials and credentials.expired and credentials.refresh_token:
+        credentials.refresh(Request())
+
+    # Step 3: If no valid credentials, get new token
+    if not credentials or not credentials.valid:
+        flow = InstalledAppFlow.from_client_config(client_secret, scopes)
+        credentials = flow.run_local_server()
+        # Save new token
+        with open("token.pkl", "wb") as f:
+            pickle.dump(credentials, f)
+
+    # Step 4: Build YouTube API
     youtube = build("youtube", "v3", credentials=credentials)
 
-    # Prepare the request body
+    # Step 5: Prepare video metadata
     request_body = {
         "snippet": {
             "title": title[:100],
@@ -37,7 +49,7 @@ def upload_to_youtube(file_path, title):
         }
     }
 
-    # Upload the video
+    # Step 6: Upload
     media_file = MediaFileUpload(file_path)
     response = youtube.videos().insert(
         part="snippet,status",
@@ -45,4 +57,4 @@ def upload_to_youtube(file_path, title):
         media_body=media_file
     ).execute()
 
-    print("✅ Upload successful:", response["id"])
+    print("✅ Upload successful! Video ID:", response["id"])
