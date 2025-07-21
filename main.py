@@ -1,44 +1,48 @@
 import os
-import openai
-import json
+from generate_script import generate_story
 from upload import upload_to_youtube
+from gtts import gTTS  # You can replace with ElevenLabs or DeepSeek TTS
+import subprocess
 
-# 1. Load prompt
-with open("prompt.txt") as f:
-    prompt = f.read()
+def save_story_as_voice(text, filename="voice.mp3"):
+    tts = gTTS(text)
+    tts.save(filename)
 
-# 2. Generate story
-openai.api_key = os.environ["OPENAI_API_KEY"]
-response = openai.ChatCompletion.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": prompt}]
-)
-story = response['choices'][0]['message']['content']
+def create_video():
+    # 1. Generate story
+    print("Generating story...")
+    story = generate_story()
+    with open("story.txt", "w", encoding="utf-8") as f:
+        f.write(story)
 
-# 3. Convert story to voice
-tts = openai.audio.speech.create(
-    model="tts-1",
-    voice="shimmer",
-    input=story
-)
-with open("voice.mp3", "wb") as f:
-    f.write(tts.read())
+    # 2. Convert story to voice
+    print("Generating voiceover...")
+    save_story_as_voice(story, "voice.mp3")
 
-# 4. Create video with background, voice, music
-from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip
-bg = VideoFileClip("background.mp4").subclip(0, 60)
-voice = AudioFileClip("voice.mp3")
-music = AudioFileClip("music.mp3").volumex(0.1)
-audio = CompositeAudioClip([voice, music.set_duration(voice.duration)])
-video = bg.set_audio(audio)
-video.write_videofile("final.mp4", fps=30)
+    # 3. Combine assets into final video
+    print("Creating final video...")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", "background.mp4",
+        "-i", "music.mp3",
+        "-i", "voice.mp3",
+        "-filter_complex", "[0:v]scale=1080:1920,setsar=1[v]",
+        "-map", "[v]",
+        "-map", "2:a",  # voiceover
+        "-map", "1:a",  # background music
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        "-shortest",
+        "final_video.mp4"
+    ]
+    subprocess.run(cmd, check=True)
 
-# 5. Loop through tokens and upload to each channel
-token_dir = "./tokens"
-for filename in os.listdir(token_dir):
-    if filename.endswith(".json"):
-        token_path = os.path.join(token_dir, filename)
-        try:
-            upload_to_youtube("final.mp4", story, token_path)
-        except Exception as e:
-            print(f"❌ Upload failed for {filename}: {e}")
+    print("Video created: final_video.mp4")
+    return story
+
+if __name__ == "__main__":
+    story_text = create_video()
+    title = story_text.split("\n")[0][:100]  # use first line as YouTube title
+    print("Uploading video...")
+    upload_to_youtube("final_video.mp4", title)
